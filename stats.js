@@ -1,136 +1,148 @@
 // recruit-ladies.js
-module.exports = async function runRecruitLadies(page) {
-  console.log("🏠 Starting Club Recruitment Script (Manual Page Range)...");
 
-  // ⚙️ MANUAL CONFIGURATION
+module.exports = async function runStatsExtractor(page) {
+  console.log("🏠 Starting Club Recruitment Script (Phase 1 + Phase 2)");
+
+  // 🔧 MANUAL PAGE RANGE
   const startPage = 1;
   const endPage = 1;
 
   if (startPage < 1 || endPage < startPage) {
-    console.log("❌ Invalid page range. startPage must be >= 1 and endPage >= startPage.");
+    console.log("❌ Invalid page range.");
     return;
   }
 
-  const tierId = 1;
-
-  // ✅ FIXED DOMAINS (VERY IMPORTANT)
+  // ✅ Lady Popular V3 endpoints
   const rankingAjaxUrl = 'https://v3.g.ladypopular.com/ajax/ranking/players.php';
-  const inviteAjaxUrl  = 'https://v3.g.ladypopular.com/ajax/guild.php';
+  const inviteAjaxUrl  = 'https://v3.g.ladypopular.com/ajax/guilds.php';
 
-  const inviteMessage = 'Hello dear! 🌸 We’d be happy to welcome you to our club. You are active, strong, and would be a wonderful addition to our team. ➊ 💖 Donations are completely voluntary, and we are very flexible about them. ➋ ⚔️ We encourage members to improve their skills at their own pace and to participate in club battles, which we plan to hold on a fixed day every week. ➌ 👑 We currently have a Vice President position open and are looking to recruit committed members (including you, if you’re interested) who are willing to share responsibility in decision-making for club policies and implementation. ➍ 🤝 We truly value every member’s opinion. All members have an equal say in how the club operates, and decisions are made with collective consent, regardless of level or skill. We believe in the principle of one person, one value. ➎ 👭 Our current goal is to build a strong club made up of strong ladies with a true sense of loyalty and belonging. We would be delighted to have you join us. Happy gaming! 🌟😉';
+  const inviteMessage =
+    'Hello dear! 🌸 We’d be happy to welcome you to our club. ' +
+    'We are friendly, flexible, and value every member equally. 💖';
 
-  let totalInvitesSent = 0;
   let totalLadiesFound = 0;
+  let totalInvitesSent = 0;
 
-  // ✅ Ensure session is active on the correct domain
+  // Ensure logged-in session
   await page.goto('https://v3.g.ladypopular.com', {
     waitUntil: 'domcontentloaded',
-    timeout: 60000,
+    timeout: 60000
   });
   await page.waitForTimeout(5000);
 
-  console.log(`\n🔍 Scanning ranking pages ${startPage} to ${endPage}...`);
+  console.log(`🔍 Scanning ranking pages ${startPage} → ${endPage}`);
 
   for (let currentPage = startPage; currentPage <= endPage; currentPage++) {
-    console.log(`\n📄 Processing page ${currentPage}...`);
+    console.log(`📄 Processing page ${currentPage}`);
 
-    let ladyIdsWithoutGuild = [];
+    let ladies = [];
 
     try {
       const response = await page.request.post(rankingAjaxUrl, {
         form: {
-          action: 'getRanking',
-          page: currentPage.toString(),
-          tierId: tierId.toString(),
-        },
-        timeout: 60000,
+          type: 'getRanking',
+          page: String(currentPage)
+        }
       });
 
       if (!response.ok()) {
-        console.log(`❌ HTTP error on page ${currentPage} (status: ${response.status()})`);
+        console.log(`❌ Ranking HTTP error ${response.status()}`);
         continue;
       }
 
       const data = await response.json();
 
-      if (data.status !== 1 || !data.html) {
-        console.log(`❌ Invalid response on page ${currentPage}`);
+      if (!data.html) {
+        console.log("❌ Ranking response missing HTML");
         continue;
       }
 
-      ladyIdsWithoutGuild = await page.evaluate(html => {
-        const div = document.createElement('div');
-        div.innerHTML = html;
+      // 🧠 Parse ranking HTML
+      ladies = await page.evaluate(html => {
+        const root = document.createElement('div');
+        root.innerHTML = html;
 
-        const rows = div.querySelectorAll('tbody tr');
+        const rows = root.querySelectorAll('tbody tr');
         const results = [];
 
         rows.forEach(row => {
-          const guildCell = row.querySelector('td.ranking-player-guild');
+          const guildCell = row.querySelector('.ranking-player-guild');
+          if (!guildCell || guildCell.children.length > 0) return;
 
-          // No club = empty cell
-          if (guildCell && guildCell.children.length === 0) {
-            const profileLink = row.querySelector('a[href^="/profile.php?id="]');
-            if (!profileLink) return;
+          const link = row.querySelector('a[href*="profile.php?id="]');
+          if (!link) return;
 
-            const href = profileLink.getAttribute('href');
-            const match = href.match(/id=(\d+)/);
-            if (!match) return;
+          const idMatch = link.href.match(/id=(\d+)/);
+          if (!idMatch) return;
 
-            const nameElement = row.querySelector('.player-avatar-name');
-            const name = nameElement ? nameElement.textContent.trim() : 'Unknown';
+          const name =
+            row.querySelector('.player-avatar-name')?.textContent.trim() ||
+            'Unknown';
 
-            results.push({
-              ladyId: match[1],
-              name,
-              profileUrl: `https://v3.g.ladypopular.com${href}`,
-            });
-          }
+          const level =
+            row.querySelector('.ranking-player-level')?.textContent.trim() ||
+            '';
+
+          results.push({
+            ladyId: idMatch[1],
+            name,
+            level,
+            profileUrl: link.href
+          });
         });
 
         return results;
       }, data.html);
 
-      totalLadiesFound += ladyIdsWithoutGuild.length;
-      console.log(`   🎯 Found ${ladyIdsWithoutGuild.length} ladies without a club.`);
+      totalLadiesFound += ladies.length;
+      console.log(`🎯 Found ${ladies.length} ladies without a club`);
 
     } catch (err) {
-      console.log(`❌ Error fetching page ${currentPage}: ${err.message}`);
+      console.log(`❌ Error reading ranking page: ${err.message}`);
       continue;
     }
 
-    // Phase 2 – Invites (we can disable later)
-    for (const { ladyId, name } of ladyIdsWithoutGuild) {
+    // ==========================
+    // 📩 PHASE 2 — SEND INVITES
+    // ==========================
+    for (const lady of ladies) {
       try {
         const inviteResponse = await page.request.post(inviteAjaxUrl, {
           form: {
             type: 'invite',
-            lady: ladyId,
-            message: inviteMessage,
-          },
-          timeout: 30000,
+            player_id: lady.ladyId,
+            message: inviteMessage
+          }
         });
 
-        const result = await inviteResponse.json();
+        const text = await inviteResponse.text();
 
-        if (result.status === 1) {
-          console.log(`✅ Invite sent to ${name} (ID: ${ladyId})`);
-          totalInvitesSent++;
-        } else {
-          console.log(`❌ Failed: ${name} (ID: ${ladyId}) - ${result.message || 'Unknown error'}`);
+        // Some LP endpoints return plain text, not JSON
+        if (!text.startsWith('{')) {
+          console.log(`❌ Invite failed for ${lady.name}: ${text.trim()}`);
+          continue;
         }
 
-        await page.waitForTimeout(2000);
+        const result = JSON.parse(text);
+
+        if (result.status === 1) {
+          console.log(`✅ Invited ${lady.name} (Lv ${lady.level})`);
+          totalInvitesSent++;
+        } else {
+          console.log(`❌ Invite rejected for ${lady.name}: ${result.message}`);
+        }
+
+        await page.waitForTimeout(2500); // cooldown
+
       } catch (err) {
-        console.log(`❌ Network error inviting ${name} (ID: ${ladyId}): ${err.message}`);
+        console.log(`❌ Network error inviting ${lady.name}: ${err.message}`);
       }
     }
 
     await page.waitForTimeout(3000);
   }
 
-  console.log(`\n🏁 Recruitment complete!`);
-  console.log(`   Pages processed: ${startPage} → ${endPage}`);
-  console.log(`   Ladies without club found: ${totalLadiesFound}`);
-  console.log(`   Invites successfully sent: ${totalInvitesSent}`);
+  console.log("\n🏁 Recruitment finished");
+  console.log(`👭 Ladies found: ${totalLadiesFound}`);
+  console.log(`📩 Invites sent: ${totalInvitesSent}`);
 };
