@@ -63,9 +63,9 @@ module.exports = async function runStatsExtractor(page) {
   console.log("📋 Sample output:", allProfiles.slice(0, 5));
 
   // -------------------------------
-  // Phase 2: Extract Lady IDs
+  // Phase 2: Extract Lady IDs (View Outfit Button)
   // -------------------------------
-  console.log(`🚀 Starting Phase 2: Extract Lady IDs`);
+  console.log(`🚀 Starting Phase 2: Extract Lady IDs from view outfit button`);
   let allLadies = [];
 
   for (let i = 0; i < allProfiles.length; i++) {
@@ -75,27 +75,18 @@ module.exports = async function runStatsExtractor(page) {
     try {
       const profileUrl = `https://v3.g.ladypopular.com/profile.php?id=${profile.profileId}`;
       await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-      await page.waitForTimeout(2000); // wait for img to load
+      await page.waitForTimeout(2000); // wait for button to render
 
-      const imgSrc = await page.evaluate(() => {
-        const img = document.querySelector('img[name="0"]');
-        return img ? img.src : null;
+      const ladyId = await page.evaluate(() => {
+        const button = document.querySelector('button[data-tag="view_outfit"]');
+        return button ? button.getAttribute('data-lady-id') : null;
       });
-
-      if (!imgSrc) {
-        console.log(`⚠️ No avatar image found for ${profile.name} (${profile.profileId})`);
-        continue;
-      }
-
-      // Extract ladyId: first number >= 5 digits and not equal to profileId
-      const numbers = imgSrc.match(/\d+/g) || [];
-      const ladyId = numbers.find(num => num.length >= 5 && num !== profile.profileId);
 
       if (ladyId) {
         console.log(`   🆔 Found Lady ID: ${ladyId}`);
         allLadies.push({ name: profile.name, ladyId });
       } else {
-        console.log(`⚠️ Could not determine Lady ID from image for ${profile.name} (${profile.profileId})`);
+        console.log(`⚠️ Could not find Lady ID for ${profile.name} (${profile.profileId})`);
       }
     } catch (err) {
       console.log(`❌ Error processing profile ${profile.name} (${profile.profileId}): ${err.message}`);
