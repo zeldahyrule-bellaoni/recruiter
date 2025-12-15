@@ -1,4 +1,4 @@
-// recruit-ladies-full-playwright.js
+// recruit-ladies-full-debug.js
 module.exports = async function runStatsExtractor(page) {
   // -------------------------------
   // Phase 1: Lady ID Extraction
@@ -10,6 +10,7 @@ module.exports = async function runStatsExtractor(page) {
   const tierId = 1;
   let allLadies = [];
 
+  // Ensure logged-in session
   await page.goto('https://v3.g.ladypopular.com', {
     waitUntil: 'domcontentloaded',
     timeout: 60000
@@ -45,8 +46,11 @@ module.exports = async function runStatsExtractor(page) {
         rows.forEach(row => {
           const profileLink = row.querySelector('a[href*="profile.php?id="]');
           const guildCell = row.querySelector('.ranking-player-guild');
+
           if (!profileLink || !guildCell) return;
-          if (guildCell.querySelector('a')) return; // already in club
+
+          // Skip if already in a club
+          if (guildCell.querySelector('a')) return;
 
           const idMatch = profileLink.getAttribute('href').match(/id=(\d+)/);
           if (!idMatch) return;
@@ -90,35 +94,57 @@ module.exports = async function runStatsExtractor(page) {
 
   const inviteMessage = `Hello dear! 🌸 We’d be happy to welcome you to our club. You are active, strong, and would be a wonderful addition to our team. ➊ 💖 Donations are completely voluntary, and we are very flexible about them. ➋ ⚔️ We encourage members to improve their skills at their own pace and to participate in club battles, which we plan to hold on a fixed day every week. ➌ 👑 We currently have a Vice President position open and are looking to recruit committed members (including you, if you’re interested) who are willing to share responsibility in decision-making for club policies and implementation. ➍ 🤝 We truly value every member’s opinion. All members have an equal say in how the club operates, and decisions are made with collective consent, regardless of level or skill. ➎ 👭 Our current goal is to build a strong club made up of strong ladies with a true sense of loyalty and belonging. We would be delighted to have you join us. Happy gaming! 🌟`;
 
+  // Make sure we are on guild page before sending invites
+  await page.goto('https://v3.g.ladypopular.com/guild.php', { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(2000);
+
   for (let i = 0; i < allLadies.length; i++) {
     const lady = allLadies[i];
 
+    console.log(`\n📤 Sending invite ${i + 1}/${allLadies.length}`);
+    console.log(`   👩 Name: ${lady.name}`);
+    console.log(`   🆔 Lady ID: ${lady.ladyId}`);
+    console.log(`   🌐 Current page: ${page.url()}`);
+
     try {
-      // Playwright request context sends the POST directly with session/cookies
-      const response = await page.request.post('https://v3.g.ladypopular.com/ajax/guilds.php', {
-        form: {
-          type: 'invite',
-          lady: lady.ladyId,
-          message: inviteMessage
-        },
-        headers: {
-          'X-Requested-With': 'XMLHttpRequest'
+      const res = await page.evaluate(async ({ ladyId, message }) => {
+        try {
+          const response = await fetch('/ajax/guilds.php', {
+            method: 'POST',
+            body: new URLSearchParams({
+              type: 'invite',
+              lady: ladyId,
+              message
+            }),
+            headers: {
+              'X-Requested-With': 'XMLHttpRequest'
+            },
+            credentials: 'same-origin'
+          });
+
+          const json = await response.json();
+          console.log("      🔹 Raw server response:", json);
+          return json;
+        } catch (err) {
+          console.log("      ❌ Fetch failed inside browser context:", err);
+          return { status: 0, message: err.message };
         }
-      });
+      }, { ladyId: lady.ladyId, message: inviteMessage });
 
-      const resJson = await response.json();
+      console.log("   📝 Response:", res);
 
-      if (resJson.status === 1) {
+      if (res.status === 1) {
         console.log(`✅ Invite sent to ${lady.name} (${lady.ladyId})`);
       } else {
-        console.log(`⚠️ Failed to send invite to ${lady.name} (${lady.ladyId}): ${resJson.message || 'Unknown error'}`);
+        console.log(`⚠️ Failed to send invite to ${lady.name} (${lady.ladyId}): ${res.message || 'Unknown error'}`);
       }
 
     } catch (err) {
       console.log(`❌ Error sending invite to ${lady.name} (${lady.ladyId}): ${err.message}`);
     }
 
-    await page.waitForTimeout(2000); // avoid spam detection
+    // Small delay to avoid spam detection
+    await page.waitForTimeout(2000);
   }
 
   console.log("✅ Phase 2 Complete. All invites processed.");
