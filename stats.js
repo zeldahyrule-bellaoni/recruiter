@@ -1,4 +1,4 @@
-// recruit-ladies-full.js
+// recruit-ladies-full-playwright.js
 module.exports = async function runStatsExtractor(page) {
   // -------------------------------
   // Phase 1: Lady ID Extraction
@@ -10,7 +10,6 @@ module.exports = async function runStatsExtractor(page) {
   const tierId = 1;
   let allLadies = [];
 
-  // Ensure logged-in session
   await page.goto('https://v3.g.ladypopular.com', {
     waitUntil: 'domcontentloaded',
     timeout: 60000
@@ -46,11 +45,8 @@ module.exports = async function runStatsExtractor(page) {
         rows.forEach(row => {
           const profileLink = row.querySelector('a[href*="profile.php?id="]');
           const guildCell = row.querySelector('.ranking-player-guild');
-
           if (!profileLink || !guildCell) return;
-
-          // Skip if already in a club
-          if (guildCell.querySelector('a')) return;
+          if (guildCell.querySelector('a')) return; // already in club
 
           const idMatch = profileLink.getAttribute('href').match(/id=(\d+)/);
           if (!idMatch) return;
@@ -98,31 +94,31 @@ module.exports = async function runStatsExtractor(page) {
     const lady = allLadies[i];
 
     try {
-      const res = await page.evaluate(async ({ ladyId, message }) => {
-        const response = await fetch('/ajax/guilds.php', {
-          method: 'POST',
-          body: new URLSearchParams({
-            type: 'invite',
-            lady: ladyId,
-            message
-          }),
-          credentials: 'same-origin'
-        });
-        return await response.json();
-      }, { ladyId: lady.ladyId, message: inviteMessage });
+      // Playwright request context sends the POST directly with session/cookies
+      const response = await page.request.post('https://v3.g.ladypopular.com/ajax/guilds.php', {
+        form: {
+          type: 'invite',
+          lady: lady.ladyId,
+          message: inviteMessage
+        },
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest'
+        }
+      });
 
-      if (res.status === 1) {
+      const resJson = await response.json();
+
+      if (resJson.status === 1) {
         console.log(`✅ Invite sent to ${lady.name} (${lady.ladyId})`);
       } else {
-        console.log(`⚠️ Failed to send invite to ${lady.name} (${lady.ladyId}): ${res.message || 'Unknown error'}`);
+        console.log(`⚠️ Failed to send invite to ${lady.name} (${lady.ladyId}): ${resJson.message || 'Unknown error'}`);
       }
 
     } catch (err) {
       console.log(`❌ Error sending invite to ${lady.name} (${lady.ladyId}): ${err.message}`);
     }
 
-    // Small delay to avoid spam detection
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(2000); // avoid spam detection
   }
 
   console.log("✅ Phase 2 Complete. All invites processed.");
